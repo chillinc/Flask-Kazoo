@@ -1,5 +1,7 @@
 
-from flask import _app_ctx_stack
+from werkzeug.local import LocalProxy
+
+from flask import current_app
 from flask.signals import Namespace
 
 from kazoo.client import KazooClient
@@ -12,10 +14,11 @@ _signals = Namespace()
 
 connection_state_changed = _signals.signal('state-change')
 
-
 def _get_client():
-    _app_ctx_stack
+    kazoo_client = current_app._get_current_object().extensions['kazoo']['client']
+    return kazoo_client
 
+kazoo_client = LocalProxy(_get_client)
 
 class Kazoo(object):
     """Kazoo Client support for Flask."""
@@ -43,6 +46,9 @@ class Kazoo(object):
         :param app: Flask application instance.
 
         """
+        app.config.setdefault('ZOOKEEPER_HOSTS', '127.0.0.1:2181')
+        app.config.setdefault('ZOOKEEPER_TIMEOUT', 3)
+
         # Put cqlengine to application extensions
         if not 'kazoo' in app.extensions:
             app.extensions['kazoo'] = {}
@@ -51,24 +57,11 @@ class Kazoo(object):
         self.hosts = app.config['ZOOKEEPER_HOSTS']
         self.timeout = app.config['ZOOKEEPER_TIMEOUT']
 
-        # Use the newstyle teardown_appcontext if it's available,
-        if hasattr(app, 'teardown_appcontext'):
-            app.teardown_appcontext(self.teardown)
+        kazoo_client = KazooClient(hosts=self.hosts)
+        kazoo_client.start(self.timeout)
+        kazoo_client.add_listener(self.connection_state_listener)
 
-    @property
-    def client(self):
-        ctx = _app_ctx_stack.top
-        if ctx is not None:
-            if not hasattr(ctx, 'kazoo_client'):
-                ctx.kazoo_client = KazooClient(hosts=self.hosts)
-                ctx.kazoo_client.start(self.timeout)
-                ctx.kazoo_client.add_listener(self.connection_state_listener)
-            return ctx.kazoo_client
-
-    def teardown(self, exception):
-        ctx = _app_ctx_stack.top
-        if hasattr(ctx, 'kazoo_client'):
-            ctx.kazoo_client.stop()
+        app.extensions['kazoo']['client'] = kazoo_client
 
     def connection_state_listener(self, state):
         """Publishes state changes to a Flask signal"""

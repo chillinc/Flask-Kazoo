@@ -1,48 +1,47 @@
 import unittest
 import uuid
 
+from kazoo.exceptions import NoNodeError
+
 from flask import Flask
-from flask.ext.kazoo import Kazoo
+from flask.ext.kazoo import Kazoo, kazoo_client
 
 
 class KazooTestCase(unittest.TestCase):
 
     def setUp(self):
-        app = Flask(__name__)
-        app.config['TESTING'] = True
-        app.config['ZOOKEEPER_HOSTS'] = 'localhost:2181'
-        app.config['ZOOKEEPER_TIMEOUT'] = 3
-        self.kazoo = Kazoo(app)
-        self.app = app
+        self.app = Flask(__name__)
+        self.app.config['TESTING'] = True
+        self.kazoo = Kazoo(self.app)
 
-        @app.route('/write/<path>')
+        self.node_prefix = '/kazoo-test/'
+        self.node_name = 'test-kazoo-node'
+        self.node_value = uuid.uuid1().bytes
+        self.app.extensions['kazoo']['client'].create('/kazoo-test/%s' % self.node_name, self.node_value, makepath=True)
+
+        @self.app.route('/write/<path>')
         def write(path):
-            return str(self.kazoo.client.create('/kazoo-test/%s' % path, b'OK', makepath=True))
+            return str(kazoo_client.set(self.node_prefix + path, b'OK'))
 
-        @app.route('/read/<path>')
+        @self.app.route('/read/<path>')
         def read(path):
-            return self.kazoo.client.get('/kazoo-test/%s' % path)[0]
+            return kazoo_client.get(self.node_prefix + path)[0]
 
-        with self.app.app_context():
-            self.kazoo.client.delete('/kazoo-test/test-kazoo-node')
-
-    def teardown(self):
-        self.kazoo.client.delete('/kazoo-test/test-kazoo-node')
+    def tearDown(self):
+        try:
+            self.app.extensions['kazoo']['client'].delete(self.node_prefix + self.node_name)
+        except NoNodeError:
+            print "Teardown got NoNodeError"
 
     def test_kazoo_set(self):
         with self.app.test_client() as c:
-            results = c.get('/write/test-kazoo-node')
+            results = c.get('/write/%s' % self.node_name)
             self.assertEqual(results.status_code, 200)
 
     def test_kazoo_read(self):
-        path = 'test-kazoo-node'
-        value = str(uuid.uuid1())
-        with self.app.app_context():
-            self.kazoo.client.create('/kazoo-test/%s' % path, value, makepath=True)
-
         with self.app.test_client() as c:
-            results = c.get('/read/%s' % path)
-            self.assertEqual(results.data, value)
+            results = c.get('/read/%s' % self.node_name)
+            self.assertEqual(results.data, self.node_value)
 
 
 if __name__ == '__main__':
