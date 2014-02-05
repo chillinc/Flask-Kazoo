@@ -48,6 +48,7 @@ class Kazoo(object):
         """
         app.config.setdefault('ZOOKEEPER_HOSTS', '127.0.0.1:2181')
         app.config.setdefault('ZOOKEEPER_TIMEOUT', 3)
+        app.config.setdefault('ZOOKEEPER_START_BLOCKING', False)
 
         # Put cqlengine to application extensions
         if not 'kazoo' in app.extensions:
@@ -58,7 +59,12 @@ class Kazoo(object):
         self.timeout = app.config['ZOOKEEPER_TIMEOUT']
 
         kazoo_client = KazooClient(hosts=self.hosts)
-        kazoo_client.start(self.timeout)
+
+        if app.config['ZOOKEEPER_START_BLOCKING']:
+            kazoo_client.start(self.timeout)
+        else:
+            kazoo_client.start_async()
+
         kazoo_client.add_listener(self.connection_state_listener)
 
         app.extensions['kazoo']['client'] = kazoo_client
