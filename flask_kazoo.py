@@ -14,11 +14,13 @@ _signals = Namespace()
 
 connection_state_changed = _signals.signal('state-change')
 
+
 def _get_client():
     kazoo_client = current_app._get_current_object().extensions['kazoo']['client']
     return kazoo_client
 
 kazoo_client = LocalProxy(_get_client)
+
 
 class Kazoo(object):
     """Kazoo Client support for Flask."""
@@ -46,22 +48,34 @@ class Kazoo(object):
         :param app: Flask application instance.
 
         """
-        app.config.setdefault('ZOOKEEPER_HOSTS', '127.0.0.1:2181')
-        app.config.setdefault('ZOOKEEPER_TIMEOUT', 3)
-        app.config.setdefault('ZOOKEEPER_START_BLOCKING', False)
+        app.config.setdefault('KAZOO_HOSTS', '127.0.0.1:2181')
+        app.config.setdefault('KAZOO_START_TIMEOUT', 3)
+        app.config.setdefault('KAZOO_START_BLOCKING', False)
+
+        app.config.setdefault('KAZOO_SESSION_TIMEOUT', 10.0)  # kazoo default
+
+        app.config.setdefault('KAZOO_DEFAULT_RETRY', True)
+        app.config.setdefault('KAZOO_RETRY_MAX_DELAY_SECONDS', 60 * 60)  # kazoo default of 1hr.
 
         # Put cqlengine to application extensions
         if not 'kazoo' in app.extensions:
             app.extensions['kazoo'] = {}
 
         # Initialize connection and store it to extensions
-        self.hosts = app.config['ZOOKEEPER_HOSTS']
-        self.timeout = app.config['ZOOKEEPER_TIMEOUT']
+        if app.config['KAZOO_DEFAULT_RETRY']:
+            retry_kwargs = {
+                'max_delay': app.config['KAZOO_RETRY_MAX_DELAY_SECONDS']
+            }
+        else:
+            retry_kwargs = None
 
-        kazoo_client = KazooClient(hosts=self.hosts)
+        kazoo_client = KazooClient(hosts=app.config['KAZOO_HOSTS'],
+                                   timeout=app.config['KAZOO_SESSION_TIMEOUT'],
+                                   connection_retry=retry_kwargs,
+                                   command_retry=retry_kwargs)
 
-        if app.config['ZOOKEEPER_START_BLOCKING']:
-            kazoo_client.start(self.timeout)
+        if app.config['KAZOO_START_BLOCKING']:
+            kazoo_client.start(app.config['KAZOO_START_TIMEOUT'])
         else:
             kazoo_client.start_async()
 
